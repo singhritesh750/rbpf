@@ -1,0 +1,104 @@
+
+name: Release
+on:
+  push:
+    tags:
+    - '[0-9]+.[0-9]+.[0-9]+'
+jobs:
+  build:
+    name : test
+    strategy:
+      fail-fast: false
+      matrix:
+       rust : [stable , beta , nightly]
+       os : [ ubuntu-latest, macos-latest, windows-latest] 
+       include: 
+           - os: ubuntu-latest
+             rust: nightly
+             allow_failure: true
+           - os : macOS-latest
+             rust: nightly
+             allow_failure: true
+           - os : windows-latest
+             rust: nightly
+             allow_failure: true
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Setup | Checkout
+        uses: actions/checkout@v2
+      - uses: actions/cache@v2
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-  
+      - run : |
+            rustup update
+            rustup component add clippy-preview
+            rustup component add rustfmt
+            cargo fmt --all -- --check
+            cargo clippy --all --tests -- --deny=warnings
+            set RUSTFLAGS="-D warnings"
+            cargo build --verbose
+            cargo test --verbose
+      - name: if conditions
+        if: ${{ matrix.rust == 'nightly' }}
+        run : |
+            rustup override set nightly
+            cargo bench -- --nocapture
+      - name: deploy     
+        run: |
+           cargo doc
+           cargo package --allow-dirty 
+#   auto_bump:
+#      needs: build
+#      runs-on: ubuntu-latest
+#      steps:
+#        - name : checkout repo
+#          uses: actions/checkout@v2
+#          with:
+#           fetch-depth: '0'
+#        - name: Bump version and push tag
+#          uses: anothrNick/github-tag-action@1.26.0
+#          env:
+#            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+#            WITH_V: true
+#            DEFAULT_BUMP: patch
+  release:
+# #     if: github.event_name == 'release' && github.event.action == 'created'
+#     if: startsWith(github.ref, 'refs/tags')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - uses: actions/cache@v2
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: solana_rbpf_${{ github.ref }}
+          body: |
+            Changes in this Release
+            - First Change
+            - Second Change
+          draft: false
+          prerelease: false
+      - name: cargo login
+        run: cargo login ${{ secrets.CRATES_IO_TOKEN}}
+      - run: | 
+          cargo publish --allow-dirty
